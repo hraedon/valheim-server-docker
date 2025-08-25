@@ -1,5 +1,5 @@
-FROM debian:bullseye-slim AS build-env
-ENV DEBIAN_FRONTEND=noninteractive
+FROM debian:bookworm-slim AS build-env
+ENV DEBIAN_FRONTEND=noninteractive STEAMCMDDIR=/opt/steamcmd VALHEIMDIR=/opt/valheim
 ARG TESTS
 ARG SOURCE_COMMIT
 ARG BUSYBOX_VERSION=1.36.1
@@ -8,7 +8,9 @@ ARG GO_VERSION=1.24.1
 
 RUN apt-get update
 RUN apt-get -y install apt-utils
-RUN apt-get -y install build-essential curl git python3 python3-pip shellcheck
+RUN apt-get -y install build-essential curl git python3 python3-pip shellcheck 
+RUN apt-get -y install ca-certificates curl unzip xz-utils tini jq lib32gcc-s1 lib32stdc++6 libsdl2-2.0-0 libnss3 libtinfo6 libx11-6
+RUN rm -rf /var/lib/apt/lists/*
 
 # Install Go 1.24 manually
 RUN curl -L -o /tmp/go${GO_VERSION}.linux-amd64.tar.gz https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz \
@@ -93,18 +95,18 @@ RUN mkdir -p /usr/local/etc/supervisor/conf.d/ \
 RUN echo "${SOURCE_COMMIT:-unknown}" > /usr/local/etc/git-commit.HEAD
 
 
-FROM --platform=linux/386 debian:buster-slim AS i386-libs
-ENV DEBIAN_FRONTEND=noninteractive
+FROM --platform=linux/386 debian:bookworm-slim AS i386-libs
 RUN apt-get update \
     && apt-get -y --no-install-recommends install \
-    libc6-dev \
+    libgcc-s1 \
     libstdc++6 \
+    libc6 \
+    zlib1g \
     libsdl2-2.0-0 \
     libcurl4 \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
 COPY --from=build-env /usr/local/ /usr/local/
 COPY --from=i386-libs /lib/ld-linux.so.2 /lib/ld-linux.so.2
@@ -112,11 +114,10 @@ COPY --from=i386-libs /lib/i386-linux-gnu /lib/i386-linux-gnu
 COPY --from=i386-libs /usr/lib/i386-linux-gnu /usr/lib/i386-linux-gnu
 COPY fake-supervisord /usr/bin/supervisord
 
-RUN groupadd -g "${PGID:-0}" -o valheim \
-    && useradd -g "${PGID:-0}" -u "${PUID:-0}" -o --create-home valheim \
+RUN groupadd -g 1000 -o valheim \
+    && useradd -g 1000 -u 1000 -o --create-home valheim \
     && apt-get update \
     && apt-get -y --no-install-recommends install apt-utils \
-    && apt-get -y dist-upgrade \
     && apt-get -y --no-install-recommends install \
     libc6-dev \
     libsdl2-2.0-0 \
@@ -147,7 +148,10 @@ RUN groupadd -g "${PGID:-0}" -o valheim \
     && update-alternatives --install /usr/bin/python python /usr/bin/python3 1 \
     && usermod -a -G crontab valheim \
     && apt-get clean \
-    && mkdir -p /var/spool/cron/crontabs /var/log/supervisor /opt/valheim /opt/steamcmd /home/valheim/.config/unity3d/IronGate /config /var/run/valheim \
+    && mkdir -p /var/spool/cron/crontabs /var/log/supervisor \
+                /opt/valheim /opt/valheim/server /opt/valheim/dl \
+                /opt/steamcmd /home/valheim/.config/unity3d/IronGate \
+                /config /var/run/valheim \    
     && ln -s /config /home/valheim/.config/unity3d/IronGate/Valheim \
     && ln -s /usr/local/bin/busybox /usr/local/sbin/syslogd \
     && ln -s /usr/local/bin/busybox /usr/local/sbin/mkpasswd \
@@ -175,10 +179,11 @@ RUN groupadd -g "${PGID:-0}" -o valheim \
     && ln -s /usr/local/bin/busybox /usr/local/bin/pstree \
     && ln -s /usr/local/bin/busybox /usr/local/bin/killall \
     && ln -s /usr/local/bin/busybox /usr/local/bin/bc \
+    && ln -s server/valheim_server.x86_64 /opt/valheim/valheim_server.x86_64 || true \
     && curl -L -o /tmp/steamcmd_linux.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz \
     && tar xzvf /tmp/steamcmd_linux.tar.gz -C /opt/steamcmd/ \
     && chown valheim:valheim /var/run/valheim \
-    && chown -R root:root /opt/steamcmd \
+    && chown -R valheim:valheim /opt/steamcmd \
     && chmod 755 /opt/steamcmd/steamcmd.sh \
     /opt/steamcmd/linux32/steamcmd \
     /opt/steamcmd/linux32/steamerrorreporter \
@@ -188,8 +193,15 @@ RUN groupadd -g "${PGID:-0}" -o valheim \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
     && date --utc --iso-8601=seconds > /usr/local/etc/build.date
 
+ENV PATH="/opt/steamcmd:${PATH}"
+ENV HOME=/home/valheim
+VOLUME ["/config", "/opt/valheim"]
 EXPOSE 2456-2458/udp
 EXPOSE 9001/tcp
 EXPOSE 80/tcp
 WORKDIR /
+USER valheim
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/local/sbin/bootstrap"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=5 \
+  CMD bash -lc 'pgrep -f valheim_server >/dev/null && ss -u -lpn | grep -E -q ":(2456|2457)\\b"'
