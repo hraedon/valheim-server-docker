@@ -30,12 +30,14 @@ RUN curl -L -o /tmp/busybox.tar.bz2 https://busybox.net/downloads/busybox-${BUSY
 
 WORKDIR /build/env2cfg
 COPY ./env2cfg/ /build/env2cfg/
-RUN if [ "${TESTS:-true}" = true ]; then \
-    pip3 install tox \
-    && tox \
-    ; \
-    fi
-RUN python3 setup.py bdist --format=gztar
+RUN apt-get update && apt-get install -y --no-install-recommends python3-venv \
+ && python3 -m venv /tmp/venv \
+ && . /tmp/venv/bin/activate \
+ && pip install --upgrade pip setuptools wheel \
+ && if [ "${TESTS:-true}" = true ]; then pip install --no-cache-dir tox && tox; fi \
+ && python setup.py bdist --format=gztar \
+ && deactivate \
+ && rm -rf /var/lib/apt/lists/* /root/.cache/pip /tmp/venv
 
 WORKDIR /build/valheim-logfilter
 COPY ./valheim-logfilter/ /build/valheim-logfilter/
@@ -151,7 +153,7 @@ RUN groupadd -g 1000 -o valheim \
     && mkdir -p /var/spool/cron/crontabs /var/log/supervisor \
                 /opt/valheim /opt/valheim/server /opt/valheim/dl \
                 /opt/steamcmd /home/valheim/.config/unity3d/IronGate \
-                /config /var/run/valheim \    
+                /config /var/run/valheim \
     && ln -s /config /home/valheim/.config/unity3d/IronGate/Valheim \
     && ln -s /usr/local/bin/busybox /usr/local/sbin/syslogd \
     && ln -s /usr/local/bin/busybox /usr/local/sbin/mkpasswd \
