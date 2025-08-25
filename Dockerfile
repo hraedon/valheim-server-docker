@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim AS build-env
+FROM --platform=linux/amd64 debian:bookworm-slim AS build-env
 ENV DEBIAN_FRONTEND=noninteractive STEAMCMDDIR=/opt/steamcmd VALHEIMDIR=/opt/valheim
 ARG TESTS
 ARG SOURCE_COMMIT
@@ -106,7 +106,7 @@ RUN apt-get update \
     libcurl4 \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-FROM debian:bookworm-slim
+FROM --platform=linux/amd64 debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
 COPY --from=build-env /usr/local/ /usr/local/
 COPY --from=i386-libs /lib/ld-linux.so.2 /lib/ld-linux.so.2
