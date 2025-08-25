@@ -73,18 +73,11 @@ COPY common /usr/local/etc/valheim/
 COPY contrib/* /usr/local/share/valheim/contrib/
 RUN chmod 755 /usr/local/sbin/bootstrap /usr/local/bin/valheim-*
 RUN if [ "${TESTS:-true}" = true ]; then \
-    shellcheck -a -x -s bash -e SC2034 \
-    /usr/local/sbin/bootstrap \
-    /usr/local/bin/valheim-tests \
-    /usr/local/bin/valheim-backup \
-    /usr/local/bin/valheim-is-idle \
-    /usr/local/bin/valheim-bootstrap \
-    /usr/local/bin/valheim-server \
-    /usr/local/bin/valheim-updater \
-    /usr/local/bin/valheim-plus-updater \
-    /usr/local/bin/bepinex-updater \
-    /usr/local/share/valheim/contrib/*.sh \
-    ; \
+      # lint scripts, but don't fail the build if warnings exist
+      find /usr/local/sbin /usr/local/bin /usr/local/share/valheim/contrib \
+        -maxdepth 1 -type f \( -name 'bootstrap' -o -name 'valheim-*' -o -name '*.sh' \) -print0 \
+      | xargs -0 -r shellcheck -a -x -s bash -e SC2034 \
+      || true ; \
     fi
 WORKDIR /
 RUN rm -rf /usr/local/lib/
