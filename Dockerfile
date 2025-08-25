@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM --platform=linux/amd64 debian:bookworm-slim AS build-env
 ENV DEBIAN_FRONTEND=noninteractive STEAMCMDDIR=/opt/steamcmd VALHEIMDIR=/opt/valheim
 ARG TESTS
@@ -5,12 +6,12 @@ ARG SOURCE_COMMIT
 ARG BUSYBOX_VERSION=1.36.1
 ARG SUPERVISOR_VERSION=4.2.5
 ARG GO_VERSION=1.24.1
-
-RUN apt-get update
-RUN apt-get -y install apt-utils
-RUN apt-get -y install build-essential curl git python3 python3-pip shellcheck 
-RUN apt-get -y install ca-certificates curl unzip xz-utils tini jq lib32gcc-s1 lib32stdc++6 libsdl2-2.0-0 libnss3 libtinfo6 libx11-6
-RUN rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      build-essential curl git python3 python3-pip python3-setuptools python3-wheel shellcheck \
+      ca-certificates unzip xz-utils tini jq lib32gcc-s1 lib32stdc++6 libsdl2-2.0-0 libnss3 libtinfo6 libx11-6 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Go 1.24 manually
 RUN curl -L -o /tmp/go${GO_VERSION}.linux-amd64.tar.gz https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz \
@@ -25,7 +26,7 @@ RUN curl -L -o /tmp/busybox.tar.bz2 https://busybox.net/downloads/busybox-${BUSY
     && tar xjvf /tmp/busybox.tar.bz2 --strip-components=1 -C /build/busybox \
     && make defconfig \
     && sed -i -e "s/^CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=.*/CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=2048/" .config \
-    && make \
+    && make -j"$(nproc)" \
     && cp busybox /usr/local/bin/
 
 WORKDIR /build/env2cfg
@@ -45,8 +46,10 @@ RUN if [ "${TESTS:-true}" = true ]; then \
     go test ./... \
     ; \
     fi
-RUN go build -ldflags="-s -w" \
-    && mv valheim-logfilter /usr/local/bin/
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -ldflags="-s -w" \
+ && mv valheim-logfilter /usr/local/bin/
 
 WORKDIR /build
 RUN git clone https://github.com/Yepoleb/python-a2s.git \
@@ -70,7 +73,7 @@ COPY bepinex-updater /usr/local/bin/
 COPY valheim-server /usr/local/bin/
 COPY defaults /usr/local/etc/valheim/
 COPY common /usr/local/etc/valheim/
-COPY contrib/* /usr/local/share/valheim/contrib/
+COPY contrib/ /usr/local/share/valheim/contrib/
 RUN chmod 755 /usr/local/sbin/bootstrap /usr/local/bin/valheim-*
 RUN if [ "${TESTS:-true}" = true ]; then \
       # lint scripts, but don't fail the build if warnings exist
@@ -177,6 +180,7 @@ RUN groupadd -g 1000 -o valheim \
     && ln -s server/valheim_server.x86_64 /opt/valheim/valheim_server.x86_64 || true \
     && curl -L -o /tmp/steamcmd_linux.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz \
     && tar xzvf /tmp/steamcmd_linux.tar.gz -C /opt/steamcmd/ \
+    && chown -R valheim:valheim /opt/valheim \
     && chown valheim:valheim /var/run/valheim \
     && chown -R valheim:valheim /opt/steamcmd \
     && chmod 755 /opt/steamcmd/steamcmd.sh \
